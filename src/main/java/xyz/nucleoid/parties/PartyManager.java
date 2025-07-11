@@ -7,8 +7,10 @@ import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.util.Formatting;
 import org.jetbrains.annotations.Nullable;
 import xyz.nucleoid.plasmid.api.event.GameEvents;
+import xyz.nucleoid.plasmid.api.game.GameSpaceManager;
 import xyz.nucleoid.plasmid.api.util.PlayerRef;
 
 import java.util.Collection;
@@ -29,6 +31,11 @@ public final class PartyManager {
     }
 
     public static void register() {
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            var partyManager = PartyManager.get(server);
+            partyManager.onPlayerJoin(handler.player);
+        });
+
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             var partyManager = PartyManager.get(server);
             partyManager.onPlayerLogOut(handler.player);
@@ -36,10 +43,15 @@ public final class PartyManager {
 
         GameEvents.COLLECT_PLAYERS_FOR_JOIN.register((gameSpace, player, additional) -> {
             var partyManager = PartyManager.get(player.server);
+            var gameSpaceManager = GameSpaceManager.get();
 
             var members = partyManager.getPartyMembers(player, true);
-            
-            additional.addAll(members);
+
+            for (var member : members) {
+                if (!gameSpaceManager.inGame(member)) {
+                    additional.add(member);
+                }
+            }
         });
 
         GameEvents.TEAM_SELECTION_LOBBY_FINALIZE.register((gameSpace, allocator, players) -> {
@@ -63,6 +75,21 @@ public final class PartyManager {
             instance = new PartyManager(server);
         }
         return instance;
+    }
+
+    public void onPlayerJoin(ServerPlayerEntity player) {
+        var ref = PlayerRef.of(player);
+
+        for (var party : this.getAllParties()) {
+            if (party.isInvited(ref)) {
+                party.getOwner().ifOnline(this.server, owner -> {
+                    var notification = PartyTexts.invitedReceiver(owner, party.getUuid())
+                            .formatted(Formatting.GOLD);
+
+                    player.sendMessage(notification, false);
+                });
+            }
+        }
     }
 
     public void onPlayerLogOut(ServerPlayerEntity player) {
